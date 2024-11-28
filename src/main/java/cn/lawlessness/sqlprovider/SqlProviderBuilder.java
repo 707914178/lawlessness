@@ -829,6 +829,17 @@ public class SqlProviderBuilder {
         return this;
     }
     
+    public SqlProviderBuilder queryCount() {
+        StringBuilder sbu = new StringBuilder();
+        sbu.append("select count(1) ")
+                .append(getFormSql())
+                .append(getJoinSql())
+                .append(getWhereSql());
+        sessionContainer.sql = sbu.toString();
+        return this;
+    }
+    
+    
     public SessionContainer result() {
         return sessionContainer;
     }
