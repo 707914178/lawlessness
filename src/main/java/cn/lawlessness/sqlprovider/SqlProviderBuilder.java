@@ -788,8 +788,8 @@ public class SqlProviderBuilder {
             }
             ++fieldProperties.showCount;
             sbu.append(fieldProperties.tabAlias)
-                    .append(".`")
-                    .append(fieldProperties.col).append("`");
+                    .append(".").append(symbol)
+                    .append(fieldProperties.col).append(symbol);
             String sqlType = OrderByType.getOrderByType(pageOrderBy.getType());
             if (null != sqlType) {
                 sbu.append(" ")
