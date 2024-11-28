@@ -445,13 +445,13 @@ public class SqlProviderBuilder {
                 .append(fieldName)
                 .append(symbol);
         });
-        sbu.insert(0, "select ");
+        sbu.insert(0, "select ").append("\n");
         return sbu.toString();
     }
     
     private String getFormSql() {
         StringBuilder formBuilder = new StringBuilder();
-        formBuilder.append("\nfrom\n\t")
+        formBuilder.append("from ")
                 .append(symbol)
                 .append(sessionContainer.tabName)
                 .append(symbol)
@@ -776,7 +776,7 @@ public class SqlProviderBuilder {
         if (null == orderByList || orderByList.isEmpty()) {
             return "";
         }
-        StringBuilder sbu = new StringBuilder("\norder by \n   ");
+        StringBuilder sbu = new StringBuilder("order by \n   ");
         for (int i = 0; i < orderByList.size(); i++) {
             PageOrderBy pageOrderBy = orderByList.get(i);
             if (i > 0) {
