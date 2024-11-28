@@ -1,20 +1,27 @@
 package cn.lawlessness.sqlprovider;
 
-import cn.lawlessness.sqlprovider.core.TabProperties;
-import cn.lawlessness.sqlprovider.core.TabProperties.TabJoinColProperties;
-import cn.lawlessness.sqlprovider.core.TabProperties.TabJoinProperties;
+import cn.lawlessness.sqlprovider.annotation.OrderBy;
+import cn.lawlessness.sqlprovider.annotation.PageIndex;
+import cn.lawlessness.sqlprovider.annotation.PageSize;
 import cn.lawlessness.sqlprovider.annotation.QueryField;
 import cn.lawlessness.sqlprovider.annotation.Tab;
 import cn.lawlessness.sqlprovider.annotation.TabCol;
 import cn.lawlessness.sqlprovider.annotation.TabJoin;
 import cn.lawlessness.sqlprovider.annotation.TabJoinCol;
 import cn.lawlessness.sqlprovider.annotation.TabQuery;
+import cn.lawlessness.sqlprovider.core.TabProperties;
+import cn.lawlessness.sqlprovider.core.TabProperties.TabJoinColProperties;
+import cn.lawlessness.sqlprovider.core.TabProperties.TabJoinProperties;
 import cn.lawlessness.sqlprovider.el.ElContextExecutor;
 import cn.lawlessness.sqlprovider.enums.ConditionOp;
+import cn.lawlessness.sqlprovider.enums.OrderByType;
 import cn.lawlessness.sqlprovider.excpetion.SqlProviderException;
+import cn.lawlessness.sqlprovider.model.PageLimit;
+import cn.lawlessness.sqlprovider.model.PageOrderBy;
 import cn.lawlessness.sqlprovider.query.QueryCondition;
 import cn.lawlessness.sqlprovider.query.QueryFilter;
 import cn.lawlessness.sqlprovider.query.ValueQueryCondition;
+import cn.lawlessness.sqlprovider.utils.ReflectUtil;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
@@ -42,7 +49,7 @@ public class SqlProviderBuilder {
     private String symbol = "\"";
 
 
-    public static Object getFieldValue(Field field, Object object) {
+    private static Object getFieldValue(Field field, Object object) {
         try {
             String name = field.getName();
             String methodName = new StringBuilder("get")
@@ -65,7 +72,7 @@ public class SqlProviderBuilder {
     }
     
 
-    public static List<Field> getAllFieldsList(final Class<?> cls) {
+    private static List<Field> getAllFieldsList(final Class<?> cls) {
         Class<?> currentClass = cls;
         List<Class<?>> allCls = new ArrayList<>();
         List<List<Field>> fieldsList = new ArrayList<>();
@@ -98,7 +105,7 @@ public class SqlProviderBuilder {
      * 驼峰命名转化为sql命名
      * @return
      */
-    public static String camelCaseToSqlCase (String name) {
+    private static String camelCaseToSqlCase (String name) {
         char[] chars = name.toCharArray();
         StringBuilder sqlCaseBuilder = new StringBuilder();
         for (int i = 0; i < chars.length; i++) {
@@ -112,9 +119,19 @@ public class SqlProviderBuilder {
     }
 
     public static class SessionContainer {
-        private Map<String, TabField> fieldMap = new LinkedHashMap<>();
+
+        private static String aliasPrefix = "t";
+        public List<PageOrderBy> orderByList = new ArrayList<>();
+//        private Map<String, TabField> fieldMap = new LinkedHashMap<>();
         
-        private Map<Class<? extends Annotation>, List<TabField>> annotationFieldMap = new LinkedHashMap<>();
+//        private Map<Class<? extends Annotation>, List<TabField>> annotationFieldMap = new LinkedHashMap<>();
+        
+        private ObjectInfo mapping;
+        
+        private ObjectInfo query;
+        
+
+        private Map<Class<? extends Annotation>, List<TabField>> queryAnnotationFieldMap = new LinkedHashMap<>();
         
         private Map<String, TabProperties> propertiesMap = new LinkedHashMap<>();
 
@@ -123,12 +140,19 @@ public class SqlProviderBuilder {
         private String tabName;
         
         private String tabAlias;
-
-        private static String aliasPrefix = "t";
         
+        private PageLimit pageLimit;
+
+//        private Object query;
+//        
+//        private Class<?> mainClz;
+        
+
         public int aliasIdx = 0;
 
         public List<QueryCondition> conditionList = new ArrayList<>();
+        
+        public String sql = null;
         
         public List<Object> paramList = new ArrayList<>();
         
@@ -136,7 +160,17 @@ public class SqlProviderBuilder {
             return aliasPrefix + ( aliasIdx ++ );
         }
         
+    }
+    
+    public static class ObjectInfo {
         
+        public ObjectInfo(Object obj) {
+            this.val = obj;
+        }
+        
+        public Object val;
+        public Map<Class<? extends Annotation>, List<TabField>> annotationFieldMap = new LinkedHashMap<>();
+        public Map<String, TabField> fieldMap = new LinkedHashMap<>();
     }
     
     public static class TabField {
@@ -145,36 +179,46 @@ public class SqlProviderBuilder {
         private Map<Class<? extends Annotation>, Annotation> annotationMap;
     }
     
-    public SessionContainer parse(Object obj) {
+    public static SqlProviderBuilder parse(Object obj) {
+        SqlProviderBuilder builder = new SqlProviderBuilder();
         Class<?> queryClz = obj.getClass();
         TabQuery tabQuery = queryClz.getAnnotation(TabQuery.class);
         Class<?> clz = tabQuery.clz();
         Tab tab = clz.getAnnotation(Tab.class);
-        sessionContainer.tabName = tab.value();
-        sessionContainer.tabAlias = sessionContainer.createAlias();
-        
+        builder.sessionContainer.query = new ObjectInfo(obj);
+        builder.sessionContainer.mapping = new ObjectInfo(clz);
+        builder.sessionContainer.tabName = tab.value();
+        builder.sessionContainer.tabAlias = builder.sessionContainer.createAlias();
+        builder.parseObj();
+        builder.parseQuery();
+        return builder;
+    }
+    
+    private void parseObj() {
+        Class<?> clz = (Class<?>)sessionContainer.mapping.val;
         List<Field> fieldList = getAllFieldsList(clz);
         for (Field field : fieldList) {
             TabField tabField = new TabField();
+            tabField.field = field;
             tabField.fieldName = field.getName();
             tabField.annotationMap = new HashMap<>();
-            sessionContainer.fieldMap.put(tabField.fieldName, tabField);
+            sessionContainer.mapping.fieldMap.put(tabField.fieldName, tabField);
             Annotation[] annotations = field.getAnnotations();
             if (null != annotations) {
                 for (Annotation annotation : annotations) {
                     Class<? extends Annotation> annotationClz = annotation.annotationType();
                     tabField.annotationMap.put(annotationClz, annotation);
-                    List<TabField> tableFields = sessionContainer.annotationFieldMap.get(annotationClz);
+                    List<TabField> tableFields = sessionContainer.mapping.annotationFieldMap.get(annotationClz);
                     if (null == tableFields) {
                         tableFields = new ArrayList<>();
-                        sessionContainer.annotationFieldMap.put(annotationClz, tableFields);
+                        sessionContainer.mapping.annotationFieldMap.put(annotationClz, tableFields);
                     }
                     tableFields.add(tabField);
                 }
             }
         }
-        List<TabField> tabJoinFieldList = sessionContainer.annotationFieldMap.get(TabJoin.class);
-        
+        List<TabField> tabJoinFieldList = sessionContainer.mapping.annotationFieldMap.get(TabJoin.class);
+
         List<TabJoinProperties> nextTabJoinPropertiesList = new ArrayList<>();
         if (null != tabJoinFieldList) {
             for (TabField tabJoinField : tabJoinFieldList) {
@@ -200,7 +244,7 @@ public class SqlProviderBuilder {
             leftProperties.subJoinList.add(tabJoinField);
         }
         // 关联字段
-        List<TabField> tabJoinColFieldList = sessionContainer.annotationFieldMap.get(TabJoinCol.class);
+        List<TabField> tabJoinColFieldList = sessionContainer.mapping.annotationFieldMap.get(TabJoinCol.class);
         if (null != tabJoinColFieldList) {
             for (TabField tabJoinColField : tabJoinColFieldList) {
                 TabJoinColProperties properties = new TabJoinColProperties();
@@ -220,7 +264,7 @@ public class SqlProviderBuilder {
                 sessionContainer.propertiesMap.put(properties.fieldId, properties);
             }
         }
-        for (TabField tabField : sessionContainer.fieldMap.values()) {
+        for (TabField tabField : sessionContainer.mapping.fieldMap.values()) {
             if (sessionContainer.propertiesMap.containsKey(tabField.fieldName)) continue;
             TabCol tabCol = (TabCol)tabField.annotationMap.get(TabCol.class);
             TabProperties properties = new TabProperties();
@@ -233,18 +277,45 @@ public class SqlProviderBuilder {
             properties.fieldId = tabField.fieldName;
             sessionContainer.propertiesMap.put(properties.fieldId, properties);
         }
-        parseQuery(obj);
-        return sessionContainer;
     }
     
-    public void parseQuery(Object query) {
+    private void parseQuery() {
+        Object query = sessionContainer.query.val;
         Class<?> clz = query.getClass();
         List<Field> fieldList = getAllFieldsList(clz);
         for (Field field : fieldList) {
-            QueryField queryField = field.getAnnotation(QueryField.class);
-            if (null == queryField) continue;
+            TabField tabField = new TabField();
+            tabField.field = field;
+            tabField.fieldName = field.getName();
+            tabField.annotationMap = new HashMap<>();
+            sessionContainer.mapping.fieldMap.put(tabField.fieldName, tabField);
+            Annotation[] annotations = field.getAnnotations();
+            if (null != annotations) {
+                for (Annotation annotation : annotations) {
+                    Class<? extends Annotation> annotationClz = annotation.annotationType();
+                    tabField.annotationMap.put(annotationClz, annotation);
+                    List<TabField> tableFields = sessionContainer.query.annotationFieldMap.get(annotationClz);
+                    if (null == tableFields) {
+                        tableFields = new ArrayList<>();
+                        sessionContainer.query.annotationFieldMap.put(annotationClz, tableFields);
+                    }
+                    tableFields.add(tabField);
+                }
+            }
+        }
+        parseQueryField();
+        parseOrderBy();
+        parsePageLimit();
+    }
+    
+    private void parseQueryField() {
+        Object query = sessionContainer.query.val;
+        List<TabField> queryFieldList = sessionContainer.query.annotationFieldMap.get(QueryField.class);
+        for (TabField tabField : queryFieldList) {
+            Field field = tabField.field;
             Object fieldValue = getFieldValue(field, query);
             if (null == fieldValue) continue;
+            QueryField queryField = (QueryField) tabField.annotationMap.get(QueryField.class);
             ValueQueryCondition valueQueryCondition = new ValueQueryCondition();
             valueQueryCondition.setFieldId("".equals(queryField.fieldId()) ? field.getName() : queryField.fieldId());
             valueQueryCondition.setOp(null == queryField.op() ? ConditionOp.EQ.getCode() : queryField.op().getCode());
@@ -252,9 +323,112 @@ public class SqlProviderBuilder {
             sessionContainer.conditionList.add(valueQueryCondition);
         }
     }
+
+    private void parseOrderBy() {
+        List<TabField> tabFieldList = sessionContainer.query.annotationFieldMap.get(OrderBy.class);
+        if (null != tabFieldList) {
+            for (TabField tabField : tabFieldList) {
+                Object fieldValue = ReflectUtil.getFieldValue(tabField.field, sessionContainer.query.val);
+                List<PageOrderBy> orderByList = builderPageOrderByList(fieldValue);
+                sessionContainer.orderByList.addAll(orderByList);
+            }
+        }
+        
+    }
+
+    /**
+     * sort
+     * @param fieldValue
+     * @return
+     */
+    private List<PageOrderBy> builderPageOrderByList(Object fieldValue) {
+        List<PageOrderBy> orderByList = new ArrayList<>();
+        if (null == fieldValue) {
+            return orderByList;
+        }
+        if (fieldValue instanceof Collection) {
+            Collection fieldValueCollection = (Collection) fieldValue;
+            for (Object o : fieldValueCollection) {
+                PageOrderBy pageOrderBy = getPageOrderBy(o);
+                if (null != pageOrderBy) {
+                    orderByList.add(pageOrderBy);
+                }
+            }
+        } else {
+            PageOrderBy pageOrderBy = getPageOrderBy(fieldValue);
+            if (null != pageOrderBy) {
+                orderByList.add(pageOrderBy);
+            }
+        }
+        return orderByList;
+    }
+
+    private PageOrderBy getPageOrderBy(Object o) {
+        if (null == o) {
+            return null;
+        }
+        Field declaredField = ReflectUtil.getClsField("fieldId", o.getClass());
+        if (null == declaredField) {
+            return null;
+        }
+        Object childFieldValue = ReflectUtil.getFieldValue(declaredField, o);
+        if (null == childFieldValue) {
+            return null;
+        }
+        PageOrderBy pageOrderBy = new PageOrderBy();
+        pageOrderBy.setFieldId(childFieldValue.toString());
+        Field typeField = ReflectUtil.getClsField("type", o.getClass());
+        if (null != typeField) {
+            Object typeValue = ReflectUtil.getFieldValue(typeField, o);
+            if (null != typeValue) {
+                pageOrderBy.setType(typeValue.toString());
+            }
+        }
+        return pageOrderBy;
+    }
+
+
+    private void parsePageLimit() {
+        List<TabField> pageSizeFieldList = sessionContainer.query.annotationFieldMap.get(PageSize.class);
+        if (null == pageSizeFieldList) {
+            return;
+        }
+        PageLimit pageLimit = new PageLimit();
+        for (int i = 0; i < pageSizeFieldList.size() && i < 1; i++) {
+            TabField tabField = pageSizeFieldList.get(i);
+            Object fieldValue = ReflectUtil.getFieldValue(tabField.field, sessionContainer.query.val);
+            if (null != fieldValue) {
+                if (fieldValue instanceof Integer) {
+                    pageLimit.pageSize = (Integer)fieldValue;
+                } else if (fieldValue instanceof Long) {
+                    pageLimit.pageSize = ((Long)fieldValue).intValue();
+                } else {
+                    pageLimit.pageSize = Integer.valueOf(fieldValue.toString());
+                }
+            }
+        }
+        if (null == pageLimit.pageSize) {
+            return ;
+        }
+        List<TabField> pageIndexFieldList = sessionContainer.query.annotationFieldMap.get(PageIndex.class);
+        sessionContainer.pageLimit = pageLimit;
+        for (int i = 0; i < pageIndexFieldList.size() && i < 1; i++) {
+            TabField tabField = pageIndexFieldList.get(i);
+            Object fieldValue = ReflectUtil.getFieldValue(tabField.field, sessionContainer.query.val);
+            if (null != fieldValue) {
+                if (fieldValue instanceof Integer) {
+                    pageLimit.pageIdx = (Integer)fieldValue;
+                } else if (fieldValue instanceof Long) {
+                    pageLimit.pageIdx = ((Long)fieldValue).intValue();
+                } else {
+                    pageLimit.pageIdx = Integer.valueOf(fieldValue.toString());
+                }
+            }
+        }
+    }
     
     
-    public String getSelectSql() {
+    private String getSelectSql() {
         StringBuilder sbu = new StringBuilder();
         sessionContainer.propertiesMap.forEach((fieldName, properties) -> {
             if (sbu.length() > 0) {
@@ -275,7 +449,7 @@ public class SqlProviderBuilder {
         return sbu.toString();
     }
     
-    public String getFormSql() {
+    private String getFormSql() {
         StringBuilder formBuilder = new StringBuilder();
         formBuilder.append("\nfrom\n\t")
                 .append(symbol)
@@ -298,22 +472,18 @@ public class SqlProviderBuilder {
         return joinName;
     }
     
-    public String getJoinSql() {
+    private String getJoinSql() {
         StringBuilder sbu = new StringBuilder();
-        sessionContainer.joinPropertiesMap.forEach((fieldName, properties) -> {
-            if (sbu.length() > 0) {
-                sbu.append("\n\r");
-            }
-            sbu.append(buildJoinSql(properties));
-        });
+        sessionContainer.joinPropertiesMap.forEach((fieldName, properties) -> 
+                                                sbu.append(buildJoinSql(properties)));
         return sbu.toString();
     }
 
-    public String buildJoinSql(TabJoinProperties properties) {
+    private String buildJoinSql(TabJoinProperties properties) {
         return buildJoinSql(null, properties);
     }
     
-    public String buildJoinSql(TabJoinProperties leftProperties, TabJoinProperties properties) {
+    private String buildJoinSql(TabJoinProperties leftProperties, TabJoinProperties properties) {
         StringBuilder sbu = new StringBuilder();
         sbu.append(getJoinName(properties.joinType))
                 .append(symbol)
@@ -327,7 +497,7 @@ public class SqlProviderBuilder {
         for (int i = 0; i < properties.onValueList.size(); i++) {
             String onValue = properties.onValueList.get(i);
             if (i > 0) {
-                sbu.append("\n\t and ");
+                sbu.append(" and ");
             }
             sbu.append("(");
             Map<String, Object> variables = new HashMap<>();
@@ -338,7 +508,7 @@ public class SqlProviderBuilder {
             sbu.append(subWhereSql).append(")\n");
         }
         for (TabJoinProperties joinProperties : properties.subJoinList) {
-            sbu.append("\n\r").append(
+            sbu.append("\r").append(
                     buildJoinSql(properties, joinProperties)
             );
         }
@@ -374,11 +544,11 @@ public class SqlProviderBuilder {
     }
 
 
-    public String getWhereSqlV2 () {
+    private String getWhereSql () {
         List<QueryCondition> conditionList = sessionContainer.conditionList;
         StringBuilder whereBuilder = new StringBuilder();
         for (QueryCondition queryCondition : conditionList) {
-            String querySql = getQuerySqlV2(queryCondition, sessionContainer.propertiesMap);
+            String querySql = getQuerySql(queryCondition, sessionContainer.propertiesMap);
             if (!querySql.isEmpty()) {
                 if (whereBuilder.length() > 0) {
                     whereBuilder.append(" and ");
@@ -387,14 +557,14 @@ public class SqlProviderBuilder {
             }
         }
         if (0 != whereBuilder.length()) {
-            whereBuilder.insert(0, "where\n\t");
+            whereBuilder.insert(0, "where\n\t").append("\n");
         }
         return whereBuilder.toString();
     }
 
-    private String getQuerySqlV2 (QueryCondition queryCondition, Map<String, TabProperties> propertiesMap) {
+    private String getQuerySql(QueryCondition queryCondition, Map<String, TabProperties> propertiesMap) {
         StringBuilder whereBuilder = new StringBuilder();
-        String conditionSql = getConditionSqlV2(queryCondition, propertiesMap);
+        String conditionSql = getConditionSql(queryCondition, propertiesMap);
         if (!conditionSql.isEmpty()) {
             whereBuilder.append(conditionSql);
         }
@@ -421,7 +591,7 @@ public class SqlProviderBuilder {
         whereBuilder.append(" (\n\t\t");
         for (int i = 0; i < children.size(); i++) {
             QueryCondition childBean = children.get(i);
-            String childSql = getQuerySqlV2(childBean, propertiesMap);
+            String childSql = getQuerySql(childBean, propertiesMap);
             if (!childSql.isEmpty()) {
                 if (i > 0) {
                     whereBuilder.append(" ").append(logicalOperator).append(" ");
@@ -433,7 +603,7 @@ public class SqlProviderBuilder {
         return whereBuilder.toString();
     }
 
-    private String getConditionSqlV2 (QueryCondition queryCondition, Map<String, TabProperties> propertiesMap) {
+    private String getConditionSql(QueryCondition queryCondition, Map<String, TabProperties> propertiesMap) {
         if (null == queryCondition) {
             return "";
         }
@@ -461,14 +631,14 @@ public class SqlProviderBuilder {
         String columnName;
         columnName = properties.tabAlias + "." +  symbol + properties.col + symbol;
         if (ConditionOp.NE.equals(op) || ConditionOp.NOTIN.equals(op)) {
-            String notNullWhereSql = getConditionValueSqlV2(properties, ConditionOp.ISNULL, conditionValue);
-            String conditionValueWhereSql = getConditionValueSqlV2(properties, op, conditionValue);
+            String notNullWhereSql = getConditionValueSql(properties, ConditionOp.ISNULL, conditionValue);
+            String conditionValueWhereSql = getConditionValueSql(properties, op, conditionValue);
             sqlBuilder.append("(").append(columnName).append(notNullWhereSql)
                     .append(" or ")
                     .append(columnName).append(conditionValueWhereSql)
                     .append(")");
         } else {
-            String conditionValueWhereSql = getConditionValueSqlV2(properties, op, conditionValue);
+            String conditionValueWhereSql = getConditionValueSql(properties, op, conditionValue);
             sqlBuilder.append(columnName).append(conditionValueWhereSql);
         }
         ++properties.showCount;
@@ -476,7 +646,7 @@ public class SqlProviderBuilder {
         return sqlBuilder.toString();
     }
 
-    private String getConditionValueSqlV2(TabProperties field, ConditionOp op, Object value) {
+    private String getConditionValueSql(TabProperties field, ConditionOp op, Object value) {
         StringBuilder sqlBuilder = new StringBuilder();
         switch (op) {
             case NOTNULL:
@@ -598,6 +768,69 @@ public class SqlProviderBuilder {
                 break;
         }
         return sqlBuilder.toString();
+    }
+
+    private String getOrderBySql() {
+        //query查询 获取limit数据
+        List<PageOrderBy> orderByList = sessionContainer.orderByList;
+        if (null == orderByList || orderByList.isEmpty()) {
+            return "";
+        }
+        StringBuilder sbu = new StringBuilder("\norder by \n   ");
+        for (int i = 0; i < orderByList.size(); i++) {
+            PageOrderBy pageOrderBy = orderByList.get(i);
+            if (i > 0) {
+                sbu.append(", ");
+            }
+            TabProperties fieldProperties = sessionContainer.propertiesMap.get(pageOrderBy.getFieldId());
+            if (null == fieldProperties) {
+                throw new SqlProviderException("unknown pageOrderBy.fieldId  【" + pageOrderBy.getFieldId() + "】");
+            }
+            ++fieldProperties.showCount;
+            sbu.append(fieldProperties.tabAlias)
+                    .append(".`")
+                    .append(fieldProperties.col).append("`");
+            String sqlType = OrderByType.getOrderByType(pageOrderBy.getType());
+            if (null != sqlType) {
+                sbu.append(" ")
+                        .append(sqlType);
+            }
+        }
+        return sbu.append("\n").toString();
+    }
+    
+    /**
+     * get page limit
+     * @return
+     */
+    private String getLimitSql() {
+        if (null == sessionContainer.pageLimit) {
+            return "";
+        }
+        // only have pageSize
+        if (null == sessionContainer.pageLimit.pageIdx) {
+            sessionContainer.paramList.add(sessionContainer.pageLimit.pageSize);
+            return "limit ?";
+        }
+        sessionContainer.paramList.add(sessionContainer.pageLimit.pageSize);
+        sessionContainer.paramList.add(sessionContainer.pageLimit.pageIdx);
+        return "limit ? offset ?";
+    }
+    
+    public SqlProviderBuilder query() {
+        StringBuilder sbu = new StringBuilder();
+        sbu.append(getSelectSql())
+                .append(getFormSql())
+                .append(getJoinSql())
+                .append(getWhereSql())
+                .append(getOrderBySql())
+                .append(getLimitSql());
+        sessionContainer.sql = sbu.toString();
+        return this;
+    }
+    
+    public SessionContainer result() {
+        return sessionContainer;
     }
     
     
