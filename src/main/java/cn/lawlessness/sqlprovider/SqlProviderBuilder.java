@@ -813,8 +813,18 @@ public class SqlProviderBuilder {
             return "limit ?";
         }
         sessionContainer.paramList.add(sessionContainer.pageLimit.pageSize);
-        sessionContainer.paramList.add(sessionContainer.pageLimit.pageIdx);
+        sessionContainer.paramList.add(getPageIndex(sessionContainer.pageLimit.pageIdx, sessionContainer.pageLimit.pageSize));
         return "limit ? offset ?";
+    }
+
+    public Integer getPageIndex(Integer pageIndex, Integer pageSize) {
+        if (null == pageIndex) {
+            return null;
+        }
+        if (null == pageSize) {
+            return null;
+        }
+        return (pageIndex-1) * pageSize;
     }
     
     public SqlProviderBuilder query() {
