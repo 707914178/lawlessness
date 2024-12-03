@@ -39,6 +39,9 @@ public class ElContextExecutor {
         if (0 == variableCount) {
             return null;
         }
+        if (null == expression) {
+            return null;
+        }
         ValueExpression valueExpression = this.factory.createValueExpression(context, expression, clz);
         try {
             return (T)valueExpression.getValue(this.context);
@@ -49,6 +52,9 @@ public class ElContextExecutor {
 
     public Object getValue(String expression) {
         if (0 == variableCount) {
+            return null;
+        }
+        if (null == expression) {
             return null;
         }
         ValueExpression valueExpression = this.factory.createValueExpression(context, expression, Object.class);
