@@ -1,5 +1,6 @@
 package cn.lawlessness.sqlprovider;
 
+import cn.lawlessness.sqlprovider.annotation.Condition;
 import cn.lawlessness.sqlprovider.annotation.OrderBy;
 import cn.lawlessness.sqlprovider.annotation.PageIndex;
 import cn.lawlessness.sqlprovider.annotation.PageSize;
@@ -304,6 +305,7 @@ public class SqlProviderBuilder {
             }
         }
         parseQueryField();
+        parseCondition();
         parseOrderBy();
         parsePageLimit();
     }
@@ -321,6 +323,37 @@ public class SqlProviderBuilder {
             valueQueryCondition.setOp(null == queryField.op() ? ConditionOp.EQ.getCode() : queryField.op().getCode());
             valueQueryCondition.setValue(fieldValue);
             sessionContainer.conditionList.add(valueQueryCondition);
+        }
+    }
+
+    private void parseCondition() {
+        Object query = sessionContainer.query.val;
+        List<TabField> queryFieldList = sessionContainer.query.annotationFieldMap.get(Condition.class);
+        for (TabField tabField : queryFieldList) {
+            Field field = tabField.field;
+            Object fieldValue = getFieldValue(field, query);
+            if (null == fieldValue) continue;
+            if (fieldValue instanceof List) {
+                List fieldValueList = (List) fieldValue;
+                if (fieldValueList.isEmpty()) {
+                    continue;
+                }
+                for (int i1 = 0; i1 < fieldValueList.size(); i1++) {
+                    Object item = fieldValueList.get(i1);
+                    if (item instanceof QueryCondition) {
+                        QueryCondition queryCondition = (QueryCondition) item;
+                        sessionContainer.conditionList.add(queryCondition);
+                    } else {
+                        throw new SqlProviderException("condition Value must QueryCondition");
+                    }
+                }
+            } else {
+                if (fieldValue instanceof QueryCondition) {
+                    sessionContainer.conditionList.add(((QueryCondition) fieldValue).clone());
+                } else {
+                    throw new SqlProviderException("condition Value must QueryCondition");
+                }
+            }
         }
     }
 
