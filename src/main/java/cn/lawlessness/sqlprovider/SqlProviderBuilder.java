@@ -21,6 +21,7 @@ import cn.lawlessness.sqlprovider.model.PageLimit;
 import cn.lawlessness.sqlprovider.model.PageOrderBy;
 import cn.lawlessness.sqlprovider.query.QueryCondition;
 import cn.lawlessness.sqlprovider.query.QueryFilter;
+import cn.lawlessness.sqlprovider.query.SqlCondition;
 import cn.lawlessness.sqlprovider.query.ValueQueryCondition;
 import cn.lawlessness.sqlprovider.utils.ReflectUtil;
 
@@ -157,10 +158,26 @@ public class SqlProviderBuilder {
         
         public List<Object> paramList = new ArrayList<>();
         
-        public String createAlias(){
+        private List<Object> endConditionParamList;
+        
+        public void addEndConditionParam(Object obj) {
+            if (endConditionParamList == null) {
+                endConditionParamList = new ArrayList<>();
+            }
+            endConditionParamList.add(obj);
+        }
+        
+        private String createAlias(){
             return aliasPrefix + ( aliasIdx ++ );
         }
         
+        public String propertyTabAlias(String property) {
+            TabProperties tabProperties = propertiesMap.get(property);
+            if (null == tabProperties) {
+                return null;
+            }
+            return tabProperties.tabAlias;
+        }
     }
     
     public static class ObjectInfo {
@@ -640,6 +657,10 @@ public class SqlProviderBuilder {
         if (null == queryCondition) {
             return "";
         }
+        if (queryCondition instanceof SqlCondition) {
+            SqlCondition sqlCondition = (SqlCondition) queryCondition;
+            return sqlCondition.getSql();
+        }
         StringBuilder sqlBuilder = new StringBuilder();
         String fieldId = queryCondition.getFieldId();
         if (null == fieldId || fieldId.isEmpty()) {
@@ -865,8 +886,11 @@ public class SqlProviderBuilder {
         sbu.append(getSelectSql())
                 .append(getFormSql())
                 .append(getJoinSql())
-                .append(getWhereSql())
-                .append(getOrderBySql())
+                .append(getWhereSql());
+        if (null != sessionContainer.endConditionParamList) {
+            sessionContainer.paramList.addAll(sessionContainer.endConditionParamList);
+        }
+        sbu.append(getOrderBySql())
                 .append(getLimitSql());
         sessionContainer.sql = sbu.toString();
         return this;
@@ -879,6 +903,9 @@ public class SqlProviderBuilder {
                 .append(getJoinSql())
                 .append(getWhereSql());
         sessionContainer.sql = sbu.toString();
+        if (null != sessionContainer.endConditionParamList) {
+            sessionContainer.paramList.addAll(sessionContainer.endConditionParamList);
+        }
         return this;
     }
     
