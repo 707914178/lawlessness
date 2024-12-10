@@ -659,7 +659,7 @@ public class SqlProviderBuilder {
         }
         if (queryCondition instanceof SqlCondition) {
             SqlCondition sqlCondition = (SqlCondition) queryCondition;
-            return sqlCondition.getSql();
+            return "(" + sqlCondition.getSql() + ")";
         }
         StringBuilder sqlBuilder = new StringBuilder();
         String fieldId = queryCondition.getFieldId();
